@@ -6,7 +6,14 @@
 
 ## 技術スタック
 
-- Python
+### Web版（メイン / Cloudflare Pages）
+- Vite + Tailwind CSS (フロントエンド)
+- PptxGenJS (ブラウザ上でpptx生成)
+- JSZip (pptx解析・読み込み)
+- Claude API (デザイン解析・スライド生成)
+- Cloudflare Pages Functions (APIプロキシ)
+
+### Python版（ローカル開発用）
 - python-pptx (テンプレート構築・スライド生成)
 - Streamlit (Web UI)
 - Claude Vision API (画像からデザイン解析)
@@ -74,25 +81,78 @@ txBox.text_frame.paragraphs[0].font.size = Pt(28)
 - デザインキャプチャで作ったテンプレート + デザイン定義を、スライド生成が参照する
 - この連携により、元のデザインを高精度に再現したスライドが生成できる
 
+## デプロイ（Cloudflare Pages）
+
+### 初回セットアップ
+```bash
+make web-setup                          # npm install
+cp web/.dev.vars.example web/.dev.vars  # API キーを設定
+# web/.dev.vars の ANTHROPIC_API_KEY に実際のキーを記入
+```
+
+### デプロイ手順
+```bash
+make web-deploy   # ビルド → デプロイ → .dev.vars からシークレット自動同期
+```
+
+### シークレット管理
+- **ローカル開発**: `web/.dev.vars` に `ANTHROPIC_API_KEY=sk-ant-...` を記入
+- **本番**: `make web-deploy` (deploy.sh) が `.dev.vars` を読んで `wrangler pages secret put` で自動同期
+- `.dev.vars` は `.gitignore` 済み、Git に入らない
+
+### ローカル開発
+```bash
+make web-dev   # vite build → wrangler pages dev dist (Functions含む)
+```
+
+### 注意事項
+- `wrangler pages deploy` のコミットメッセージは ASCII のみ（日本語不可）
+- deploy.sh 内で `--commit-message` を英語で指定している
+
 ## プロジェクト構成
 
 ```
 slide-generate-tool/
 ├── CLAUDE.md
+├── Makefile
 ├── requirements.txt
-├── src/
-│   ├── core/                    # 基盤ロジック
-│   │   ├── analyzer.py         #   デザイン解析（画像/pptx/PDF→デザイン定義）
-│   │   ├── builder.py          #   テンプレート構築（デザイン定義→pptx）
-│   │   ├── renderer.py         #   スライド→画像変換（プレビュー用）
-│   │   └── generator.py        #   スライド生成エンジン
-│   │
-│   └── ui/                      # Streamlit Web UI
-│       ├── app.py               #   メインアプリ（ページルーティング）
-│       ├── capture.py           #   デザインキャプチャページ
-│       └── generate.py          #   スライド生成ページ
 │
-├── templates/                   # テンプレート .pptx
-├── designs/                     # デザイン定義ファイル
-└── output/                      # 生成されたスライド
+├── web/                          # Web版（Cloudflare Pages）★メイン
+│   ├── src/
+│   │   ├── index.html
+│   │   ├── css/style.css
+│   │   └── js/
+│   │       ├── main.js           #   エントリーポイント
+│   │       ├── router.js         #   ページルーティング
+│   │       ├── pages/
+│   │       │   ├── capture.js    #   デザインキャプチャページ
+│   │       │   └── generate.js   #   スライド生成ページ
+│   │       └── lib/
+│   │           ├── chat.js       #   チャットUI
+│   │           ├── preview.js    #   スライドプレビュー
+│   │           ├── pptx-builder.js  # pptxgenjs ラッパー
+│   │           └── pptx-reader.js   # pptx解析（JSZip）
+│   ├── functions/
+│   │   └── api/
+│   │       └── chat.js           #   Claude APIプロキシ (Pages Function)
+│   ├── scripts/deploy.sh
+│   ├── wrangler.toml
+│   ├── .dev.vars.example
+│   ├── package.json
+│   └── vite.config.js
+│
+├── src/                          # Python版（ローカル開発用）
+│   ├── core/
+│   │   ├── analyzer.py
+│   │   ├── builder.py
+│   │   ├── renderer.py
+│   │   └── generator.py
+│   └── ui/
+│       ├── app.py
+│       ├── capture.py
+│       └── generate.py
+│
+├── templates/                    # テンプレート .pptx
+├── designs/                      # デザイン定義ファイル
+└── output/                       # 生成されたスライド
 ```
