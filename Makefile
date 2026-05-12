@@ -1,4 +1,4 @@
-.PHONY: help setup dev build deploy
+.PHONY: help setup dev build deploy secrets
 
 # ============================================================
 #  make help で使い方を表示
@@ -18,6 +18,7 @@ help:
 	@echo ""
 	@echo "  \033[1mデプロイ\033[0m"
 	@echo "    make deploy             Cloudflare Pagesにデプロイ"
+	@echo "    make secrets            シークレットのみ同期 (.dev.vars → Cloudflare)"
 	@echo ""
 	@echo "  \033[1m使い方の流れ\033[0m"
 	@echo "    1. make setup    → 初回セットアップ"
@@ -58,3 +59,17 @@ build:
 
 deploy:
 	bash scripts/deploy.sh
+
+secrets:
+	@if [ ! -f .dev.vars ]; then \
+		echo "  .dev.vars が見つかりません。make setup を実行してください。"; \
+		exit 1; \
+	fi
+	@while IFS='=' read -r key value; do \
+		[ -z "$$key" ] || echo "$$key" | grep -q '^#' && continue; \
+		key=$$(echo "$$key" | xargs); \
+		value=$$(echo "$$value" | xargs); \
+		[ -z "$$key" ] && continue; \
+		echo "$$value" | wrangler pages secret put "$$key" --project-name slide-generate-tool; \
+		echo "  ✓ $$key"; \
+	done < .dev.vars
