@@ -6,3 +6,4 @@ dist/
 .env.*
 !.env.example
 .dev.vars2
+.claude/settings.local.json
