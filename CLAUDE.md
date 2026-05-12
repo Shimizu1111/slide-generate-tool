@@ -26,11 +26,12 @@
 3. 解析結果をもとにAIがpptxgenjsコードを生成しテンプレート構築
 4. チャットで修正指示 → 再現精度を上げる
 
-**出力**: テンプレート .pptx（ダウンロード）
+**出力**: テンプレート .pptx（ダウンロード or IndexedDBに保存）
 
 ### 2. スライド生成
 
-テンプレート + コンテンツ → 完成スライド(.pptx)を生成する。
+キャプチャで保存したテンプレート + コンテンツ → 完成スライド(.pptx)を生成する。
+テンプレートはIndexedDBから読み込み、キャプチャページと連携する。
 
 **コンテンツの入力方法**:
 - **フォームモード**: テンプレートのスライドを選び、プレースホルダーを直接編集
@@ -88,7 +89,8 @@ slide-generate-tool/
 │           ├── chat.js          # チャットUI
 │           ├── preview.js       # スライドプレビュー
 │           ├── pptx-builder.js  # pptxgenjs ラッパー
-│           └── pptx-reader.js   # pptx解析（JSZip）
+│           ├── pptx-reader.js   # pptx解析（JSZip）
+│           └── template-store.js # テンプレート保存（IndexedDB）
 ├── functions/
 │   └── api/
 │       └── chat.js              # Claude APIプロキシ (Pages Function)

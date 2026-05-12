@@ -2,6 +2,7 @@ import { chatUI } from "../lib/chat.js";
 import { slidePreview } from "../lib/preview.js";
 import { parsePptx } from "../lib/pptx-reader.js";
 import { generatePptx, downloadPptx } from "../lib/pptx-builder.js";
+import { listTemplates, deleteTemplate } from "../lib/template-store.js";
 
 const SYSTEM_PROMPT = `あなたはスライド生成の専門家です。
 ユーザーの要望に基づいて、テンプレートのデザインを使ってスライドを生成します。
@@ -23,8 +24,10 @@ const SYSTEM_PROMPT = `あなたはスライド生成の専門家です。
 }`;
 
 let state = {
+  templates: [],
+  selectedTemplate: null,
   templateInfo: null,
-  mode: "form", // "form" | "chat"
+  mode: "form",
   composition: [],
   messages: [],
   pres: null,
@@ -32,23 +35,31 @@ let state = {
 };
 
 export function renderGeneratePage(container) {
+  state = {
+    templates: [],
+    selectedTemplate: null,
+    templateInfo: null,
+    mode: "form",
+    composition: [],
+    messages: [],
+    pres: null,
+    outputSlides: [],
+  };
+
   container.innerHTML = `
     <div class="flex h-screen">
-      <!-- Left: Template -->
+      <!-- Left: Template Selection -->
       <div class="w-1/2 flex flex-col border-r border-gray-800">
         <div class="p-4 border-b border-gray-800">
           <h2 class="text-lg font-semibold">スライド生成</h2>
-          <p class="text-sm text-gray-400 mt-1">テンプレートを使ってスライドを生成</p>
+          <p class="text-sm text-gray-400 mt-1">テンプレートを選んでスライドを生成</p>
         </div>
-        <div class="p-4 border-b border-gray-800">
-          <label class="block">
-            <input type="file" id="template-file" accept=".pptx"
-              class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-600 file:text-white hover:file:bg-blue-700 file:cursor-pointer" />
-          </label>
+        <div id="template-list" class="p-4 border-b border-gray-800">
+          <div class="text-gray-500 text-sm">テンプレートを読み込み中...</div>
         </div>
         <div id="slide-gallery" class="p-4 overflow-auto flex-1">
           <div class="flex items-center justify-center h-48 text-gray-500">
-            テンプレートPPTXをアップロードしてください
+            テンプレートを選択してください
           </div>
         </div>
       </div>
@@ -95,7 +106,6 @@ export function renderGeneratePage(container) {
     </div>
   `;
 
-  const templateFile = container.querySelector("#template-file");
   const previewBtn = container.querySelector("#gen-preview-btn");
   const downloadBtn = container.querySelector("#gen-download-btn");
   const modeForm = container.querySelector("#mode-form");
@@ -104,15 +114,137 @@ export function renderGeneratePage(container) {
 
   chatUI.init(genChat, handleChatMessage);
 
-  // Mode switching
   modeForm.addEventListener("click", () => switchMode("form"));
   modeChat.addEventListener("click", () => switchMode("chat"));
 
-  templateFile.addEventListener("change", handleTemplateUpload);
   previewBtn.addEventListener("click", handleFormGenerate);
   downloadBtn.addEventListener("click", async () => {
     if (state.pres) await downloadPptx(state.pres);
   });
+
+  loadTemplates();
+}
+
+async function loadTemplates() {
+  const templateListEl = document.getElementById("template-list");
+  try {
+    state.templates = await listTemplates();
+
+    if (state.templates.length === 0) {
+      templateListEl.innerHTML = `
+        <div class="text-gray-500 text-sm">
+          <p>保存済みテンプレートがありません。</p>
+          <p class="mt-1">先に「デザインキャプチャ」でテンプレートを作成・保存してください。</p>
+          <div class="mt-3 border-t border-gray-800 pt-3">
+            <label class="block">
+              <span class="text-xs text-gray-400">または PPTX を直接アップロード:</span>
+              <input type="file" id="fallback-upload" accept=".pptx"
+                class="mt-1 block w-full text-sm text-gray-400 file:mr-4 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-gray-700 file:text-gray-300 hover:file:bg-gray-600 file:cursor-pointer" />
+            </label>
+          </div>
+        </div>
+      `;
+      const fallbackInput = templateListEl.querySelector("#fallback-upload");
+      fallbackInput.addEventListener("change", handleFallbackUpload);
+      return;
+    }
+
+    templateListEl.innerHTML = `
+      <div class="space-y-2">
+        ${state.templates
+          .map(
+            (t) => `
+          <div class="template-item flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2 cursor-pointer hover:bg-gray-700 transition-colors" data-id="${t.id}">
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-medium truncate">${escapeHtml(t.name)}</div>
+              <div class="text-xs text-gray-500">${new Date(t.createdAt).toLocaleString("ja-JP")} / ${t.slides.length}枚</div>
+            </div>
+            <button class="delete-template ml-2 px-2 py-1 text-xs text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded" data-id="${t.id}">削除</button>
+          </div>
+        `
+          )
+          .join("")}
+      </div>
+      <div class="mt-3 border-t border-gray-800 pt-3">
+        <label class="block">
+          <span class="text-xs text-gray-400">PPTX を直接アップロード:</span>
+          <input type="file" id="fallback-upload" accept=".pptx"
+            class="mt-1 block w-full text-sm text-gray-400 file:mr-4 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-gray-700 file:text-gray-300 hover:file:bg-gray-600 file:cursor-pointer" />
+        </label>
+      </div>
+    `;
+
+    // Template selection
+    templateListEl.querySelectorAll(".template-item").forEach((item) => {
+      item.addEventListener("click", (e) => {
+        if (e.target.classList.contains("delete-template")) return;
+        const id = parseInt(item.dataset.id);
+        selectTemplate(id);
+        templateListEl.querySelectorAll(".template-item").forEach((el) =>
+          el.classList.toggle("ring-2", parseInt(el.dataset.id) === id)
+        );
+        templateListEl.querySelectorAll(".template-item").forEach((el) =>
+          el.classList.toggle("ring-blue-500", parseInt(el.dataset.id) === id)
+        );
+      });
+    });
+
+    // Delete buttons
+    templateListEl.querySelectorAll(".delete-template").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const id = parseInt(btn.dataset.id);
+        await deleteTemplate(id);
+        loadTemplates();
+      });
+    });
+
+    // Fallback upload
+    const fallbackInput = templateListEl.querySelector("#fallback-upload");
+    if (fallbackInput) {
+      fallbackInput.addEventListener("change", handleFallbackUpload);
+    }
+  } catch (err) {
+    templateListEl.innerHTML = `<div class="text-red-400 text-sm">読み込みエラー: ${err.message}</div>`;
+  }
+}
+
+async function selectTemplate(id) {
+  const template = state.templates.find((t) => t.id === id);
+  if (!template) return;
+
+  state.selectedTemplate = template;
+  state.composition = [];
+  state.messages = [];
+
+  // Parse the pptx binary to get structure
+  try {
+    state.templateInfo = await parsePptx(template.pptxBinary);
+  } catch {
+    // Fall back to stored slide definitions
+    state.templateInfo = { slides: template.slides, slideWidth: 10, slideHeight: 5.63 };
+  }
+
+  renderGallery(state.templateInfo);
+  renderComposition();
+}
+
+async function handleFallbackUpload(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const gallery = document.getElementById("slide-gallery");
+  gallery.innerHTML = '<div class="flex items-center justify-center h-48"><div class="spinner"></div></div>';
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    state.templateInfo = await parsePptx(arrayBuffer);
+    state.selectedTemplate = { name: file.name };
+    state.composition = [];
+    renderGallery(state.templateInfo);
+  } catch (err) {
+    gallery.innerHTML = `<div class="text-red-400 p-4">解析エラー: ${err.message}</div>`;
+  }
 }
 
 function switchMode(mode) {
@@ -132,24 +264,6 @@ function switchMode(mode) {
     chatEl.classList.remove("hidden");
     formBtn.classList.remove("active");
     chatBtn.classList.add("active");
-  }
-}
-
-async function handleTemplateUpload(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-
-  const gallery = document.getElementById("slide-gallery");
-  gallery.innerHTML = '<div class="flex items-center justify-center h-48"><div class="spinner"></div></div>';
-
-  try {
-    const arrayBuffer = await file.arrayBuffer();
-    const info = await parsePptx(arrayBuffer);
-    state.templateInfo = info;
-    state.composition = [];
-    renderGallery(info);
-  } catch (err) {
-    gallery.innerHTML = `<div class="text-red-400 p-4">解析エラー: ${err.message}</div>`;
   }
 }
 
@@ -173,7 +287,7 @@ function renderGallery(info) {
     `;
 
     const previewEl = card.querySelector(".slide-preview");
-    slidePreview.renderSingle(previewEl, slide);
+    requestAnimationFrame(() => slidePreview.renderSingle(previewEl, slide));
 
     card.querySelector(".add-slide-btn").addEventListener("click", (e) => {
       e.stopPropagation();
@@ -224,16 +338,16 @@ function renderComposition() {
           <button class="remove px-2 py-1 bg-red-600/50 hover:bg-red-600 rounded text-xs">削除</button>
         </div>
       </div>
-      <div class="space-y-2" id="placeholders-${item.id}"></div>
+      <div class="space-y-2 placeholder-fields"></div>
     `;
 
-    const phContainer = card.querySelector(`#placeholders-${item.id}`);
+    const phContainer = card.querySelector(".placeholder-fields");
     Object.entries(item.placeholders).forEach(([key, value]) => {
       const field = document.createElement("div");
       field.innerHTML = `
-        <label class="text-xs text-gray-400">${key}</label>
+        <label class="text-xs text-gray-400">${escapeHtml(key)}</label>
         <textarea class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 mt-1 resize-none"
-          rows="2" data-key="${key}">${escapeHtml(value)}</textarea>
+          rows="2" data-key="${escapeHtml(key)}">${escapeHtml(value)}</textarea>
       `;
       field.querySelector("textarea").addEventListener("input", (e) => {
         item.placeholders[key] = e.target.value;
@@ -295,6 +409,15 @@ async function handleFormGenerate() {
             if (shape.align) opts.push(`align: "${shape.align}"`);
             if (shape.fill) opts.push(`fill: { color: "${shape.fill}" }`);
             code += `  slide.addText(${JSON.stringify(text)}, { ${opts.join(", ")} });\n`;
+          } else if (shape.type === "shape") {
+            const opts = [];
+            if (shape.x !== undefined) opts.push(`x: ${shape.x}`);
+            if (shape.y !== undefined) opts.push(`y: ${shape.y}`);
+            if (shape.w !== undefined) opts.push(`w: ${shape.w}`);
+            if (shape.h !== undefined) opts.push(`h: ${shape.h}`);
+            if (shape.fill) opts.push(`fill: { color: "${shape.fill}" }`);
+            if (shape.line) opts.push(`line: { color: "${shape.line}" }`);
+            code += `  slide.addShape(pres.ShapeType.rect, { ${opts.join(", ")} });\n`;
           }
         });
       }
@@ -313,11 +436,10 @@ async function handleFormGenerate() {
 
 async function handleChatMessage(userMessage) {
   if (!state.templateInfo) {
-    chatUI.addMessage("assistant", "先にテンプレートPPTXをアップロードしてください。");
+    chatUI.addMessage("assistant", "先にテンプレートを選択してください。");
     return;
   }
 
-  // Include template structure in first message
   const isFirst = state.messages.length === 0;
   const content = isFirst
     ? `以下のテンプレートのデザインを使って、ユーザーの指示に従ってスライドを生成してください。
@@ -344,8 +466,14 @@ ${JSON.stringify(state.templateInfo, null, 2)}
 
     const data = await response.json();
     const responseContent = data.content || "";
-    const jsonMatch = responseContent.match(/\{[\s\S]*\}/);
-    const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { message: responseContent };
+
+    let parsed;
+    try {
+      const jsonMatch = responseContent.match(/\{[\s\S]*\}/);
+      parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { message: responseContent };
+    } catch {
+      parsed = { message: responseContent };
+    }
 
     const assistantMessage = parsed.message || "スライドを生成しました。";
     state.messages.push({ role: "assistant", content: assistantMessage });

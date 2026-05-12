@@ -1,20 +1,13 @@
-// Parse PPTX (ZIP/XML) to extract slide structure for preview and cloning
-// Uses JSZip loaded from CDN or bundled
+import JSZip from "jszip";
 
 export async function parsePptx(arrayBuffer) {
-  // Dynamically load JSZip if not available
-  if (!window.JSZip) {
-    await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js");
-  }
-
   const zip = await JSZip.loadAsync(arrayBuffer);
   const result = {
     slides: [],
-    slideWidth: 10, // inches (default 16:9)
+    slideWidth: 10,
     slideHeight: 5.63,
   };
 
-  // Parse presentation.xml for slide size
   const presXml = await readXml(zip, "ppt/presentation.xml");
   if (presXml) {
     const sldSz = presXml.querySelector("sldSz");
@@ -24,7 +17,6 @@ export async function parsePptx(arrayBuffer) {
     }
   }
 
-  // Find all slide files
   const slideFiles = Object.keys(zip.files)
     .filter((f) => /^ppt\/slides\/slide\d+\.xml$/.test(f))
     .sort((a, b) => {
@@ -39,13 +31,11 @@ export async function parsePptx(arrayBuffer) {
 
     const slideData = { shapes: [], background: null };
 
-    // Parse background
     const bgFill = slideXml.querySelector("bg > bgPr > solidFill > srgbClr");
     if (bgFill) {
       slideData.background = bgFill.getAttribute("val");
     }
 
-    // Parse shapes (sp elements)
     const shapes = slideXml.querySelectorAll("spTree > sp");
     shapes.forEach((sp, idx) => {
       const shape = parseShape(sp, idx);
@@ -62,7 +52,6 @@ function parseShape(sp, idx) {
   const nvSpPr = sp.querySelector("nvSpPr");
   const name = nvSpPr?.querySelector("cNvPr")?.getAttribute("name") || `Shape ${idx + 1}`;
 
-  // Position and size
   const off = sp.querySelector("spPr > xfrm > off");
   const ext = sp.querySelector("spPr > xfrm > ext");
 
@@ -71,11 +60,9 @@ function parseShape(sp, idx) {
   const w = ext ? emuToInches(parseInt(ext.getAttribute("cx") || "0")) : undefined;
   const h = ext ? emuToInches(parseInt(ext.getAttribute("cy") || "0")) : undefined;
 
-  // Fill
   const solidFill = sp.querySelector("spPr > solidFill > srgbClr");
   const fill = solidFill?.getAttribute("val") || undefined;
 
-  // Text
   const txBody = sp.querySelector("txBody");
   let text = undefined;
   let fontSize = undefined;
@@ -93,7 +80,6 @@ function parseShape(sp, idx) {
         const t = r.querySelector("t");
         if (t) textParts.push(t.textContent);
 
-        // Get font properties from first run
         if (!fontSize) {
           const rPr = r.querySelector("rPr");
           if (rPr) {
@@ -108,7 +94,6 @@ function parseShape(sp, idx) {
         }
       });
 
-      // Alignment
       const pPr = p.querySelector("pPr");
       if (pPr && !align) {
         align = pPr.getAttribute("algn");
@@ -140,14 +125,4 @@ async function readXml(zip, path) {
 
 function emuToInches(emu) {
   return Math.round((emu / 914400) * 100) / 100;
-}
-
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = src;
-    script.onload = resolve;
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
 }

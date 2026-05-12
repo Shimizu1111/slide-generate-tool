@@ -3,18 +3,17 @@ export const slidePreview = {
     container.innerHTML = "";
 
     if (!slides || slides.length === 0) {
-      container.innerHTML = '<div class="text-gray-500 text-center py-8">スライドがありません</div>';
+      container.innerHTML = '<div class="text-gray-500 text-center py-8">No slides</div>';
       return;
     }
 
-    // Slide navigation
     if (slides.length > 1) {
       const nav = document.createElement("div");
       nav.className = "flex items-center gap-2 mb-4";
       nav.innerHTML = `
-        <button id="prev-slide" class="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-sm disabled:opacity-30" disabled>←</button>
-        <span class="text-sm text-gray-400" id="slide-counter">1 / ${slides.length}</span>
-        <button id="next-slide" class="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-sm" ${slides.length <= 1 ? "disabled" : ""}>→</button>
+        <button class="prev-slide px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-sm disabled:opacity-30" disabled>&larr;</button>
+        <span class="text-sm text-gray-400 slide-counter">1 / ${slides.length}</span>
+        <button class="next-slide px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-sm">&rarr;</button>
       `;
       container.appendChild(nav);
 
@@ -22,11 +21,10 @@ export const slidePreview = {
       const slideEl = document.createElement("div");
       slideEl.className = "slide-preview";
       container.appendChild(slideEl);
-      this.renderSingle(slideEl, slides[0]);
 
-      const prevBtn = nav.querySelector("#prev-slide");
-      const nextBtn = nav.querySelector("#next-slide");
-      const counter = nav.querySelector("#slide-counter");
+      const prevBtn = nav.querySelector(".prev-slide");
+      const nextBtn = nav.querySelector(".next-slide");
+      const counter = nav.querySelector(".slide-counter");
 
       const updateNav = () => {
         counter.textContent = `${currentIndex + 1} / ${slides.length}`;
@@ -37,11 +35,14 @@ export const slidePreview = {
 
       prevBtn.addEventListener("click", () => { currentIndex--; updateNav(); });
       nextBtn.addEventListener("click", () => { currentIndex++; updateNav(); });
+
+      // Use requestAnimationFrame so the element has layout before first render
+      requestAnimationFrame(() => this.renderSingle(slideEl, slides[0]));
     } else {
       const slideEl = document.createElement("div");
       slideEl.className = "slide-preview";
       container.appendChild(slideEl);
-      this.renderSingle(slideEl, slides[0]);
+      requestAnimationFrame(() => this.renderSingle(slideEl, slides[0]));
     }
   },
 
@@ -51,9 +52,9 @@ export const slidePreview = {
 
     if (!slide.shapes) return;
 
+    // Fallback to reasonable defaults if element has no layout yet
     const containerWidth = el.offsetWidth || 400;
-    const containerHeight = el.offsetHeight || 225;
-    // Standard slide is 10" x 5.63" (16:9)
+    const containerHeight = el.offsetHeight || (containerWidth * 9 / 16);
     const scaleX = containerWidth / 10;
     const scaleY = containerHeight / 5.63;
 
@@ -88,6 +89,10 @@ export const slidePreview = {
         div.style.whiteSpace = "pre-wrap";
         div.style.lineHeight = "1.3";
         div.style.padding = "2px 4px";
+
+        if (shape.fill) {
+          div.style.backgroundColor = `#${shape.fill}`;
+        }
 
         const textSpan = document.createElement("span");
         textSpan.style.width = "100%";

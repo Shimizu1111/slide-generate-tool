@@ -2,6 +2,7 @@ import { chatUI } from "../lib/chat.js";
 import { slidePreview } from "../lib/preview.js";
 import { parsePptx } from "../lib/pptx-reader.js";
 import { generatePptx, downloadPptx } from "../lib/pptx-builder.js";
+import { saveTemplate } from "../lib/template-store.js";
 
 const SYSTEM_PROMPT = `あなたはスライドデザインの再現専門家です。
 ユーザーがアップロードした画像やPPTXのデザインを、pptxgenjsのJavaScriptコードで忠実に再現してください。
@@ -31,15 +32,24 @@ valign: "top", "middle", "bottom"
 fill: { color: "0088CC" }`;
 
 let state = {
-  sourceType: null, // "image" | "pptx" | "pdf"
+  sourceType: null,
   sourceDataUrl: null,
-  sourceInfo: null, // parsed pptx info
+  sourceInfo: null,
   messages: [],
   slideDefinitions: [],
   pres: null,
 };
 
 export function renderCapturePage(container) {
+  state = {
+    sourceType: null,
+    sourceDataUrl: null,
+    sourceInfo: null,
+    messages: [],
+    slideDefinitions: [],
+    pres: null,
+  };
+
   container.innerHTML = `
     <div class="flex h-screen">
       <!-- Left: Source -->
@@ -68,9 +78,16 @@ export function renderCapturePage(container) {
             <h2 class="text-lg font-semibold">再現結果</h2>
             <p class="text-sm text-gray-400 mt-1">AIが再現したテンプレート</p>
           </div>
-          <button id="capture-download-btn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-            テンプレDL
-          </button>
+          <div class="flex gap-2 items-center">
+            <input type="text" id="template-name" placeholder="テンプレート名"
+              class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100 w-40 hidden" />
+            <button id="capture-save-btn" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed hidden" disabled>
+              保存
+            </button>
+            <button id="capture-download-btn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+              DL
+            </button>
+          </div>
         </div>
         <div id="capture-preview" class="p-4 overflow-auto" style="min-height: 200px;">
           <div class="flex items-center justify-center h-48 text-gray-500">
@@ -89,22 +106,36 @@ export function renderCapturePage(container) {
 
   const sourceFile = container.querySelector("#source-file");
   const downloadBtn = container.querySelector("#capture-download-btn");
+  const saveBtn = container.querySelector("#capture-save-btn");
+  const templateNameInput = container.querySelector("#template-name");
   const captureChat = container.querySelector("#capture-chat");
 
   chatUI.init(captureChat, handleRefinement);
-
-  // Restore previous state
-  state.messages.forEach((msg) => chatUI.addMessage(msg.role, msg.content));
-  if (state.slideDefinitions.length > 0) {
-    const capturePreview = container.querySelector("#capture-preview");
-    slidePreview.render(capturePreview, state.slideDefinitions);
-    downloadBtn.disabled = false;
-  }
 
   sourceFile.addEventListener("change", handleFileUpload);
 
   downloadBtn.addEventListener("click", async () => {
     if (state.pres) await downloadPptx(state.pres);
+  });
+
+  saveBtn.addEventListener("click", async () => {
+    if (!state.pres) return;
+    const name = templateNameInput.value.trim() || `テンプレート ${new Date().toLocaleString("ja-JP")}`;
+    try {
+      saveBtn.disabled = true;
+      saveBtn.textContent = "保存中...";
+      const binary = await state.pres.write({ outputType: "arraybuffer" });
+      await saveTemplate(name, binary, state.slideDefinitions);
+      saveBtn.textContent = "保存済み";
+      setTimeout(() => {
+        saveBtn.textContent = "保存";
+        saveBtn.disabled = false;
+      }, 2000);
+    } catch (err) {
+      saveBtn.textContent = "保存";
+      saveBtn.disabled = false;
+      chatUI.addMessage("assistant", `保存エラー: ${err.message}`);
+    }
   });
 }
 
@@ -132,29 +163,28 @@ async function handleFileUpload(e) {
 
 async function handleImage(file) {
   state.sourceType = "image";
-
-  // Show image preview
   const dataUrl = await fileToDataUrl(file);
   state.sourceDataUrl = dataUrl;
-  const sourcePreview = document.getElementById("source-preview");
-  sourcePreview.innerHTML = `<img src="${dataUrl}" class="max-w-full rounded-lg shadow-lg" />`;
 
-  // Send to Claude Vision API for analysis
+  const sourcePreview = document.getElementById("source-preview");
+  sourcePreview.innerHTML = "";
+  const img = document.createElement("img");
+  img.src = dataUrl;
+  img.className = "max-w-full rounded-lg shadow-lg";
+  sourcePreview.appendChild(img);
+
   await analyzeAndGenerate(dataUrl, "image");
 }
 
 async function handlePptx(file) {
   state.sourceType = "pptx";
-
   const arrayBuffer = await file.arrayBuffer();
   const info = await parsePptx(arrayBuffer);
   state.sourceInfo = info;
 
-  // Show source preview
   const sourcePreview = document.getElementById("source-preview");
   slidePreview.render(sourcePreview, info.slides);
 
-  // Send structure to AI for reproduction
   const prompt = `以下のスライドテンプレートのデザインを忠実に再現してください。
 テキスト内容はプレースホルダー（例: "タイトルをここに入力"）に置き換えてください。
 
@@ -165,25 +195,21 @@ ${JSON.stringify(info, null, 2)}
 
   state.messages = [{ role: "user", content: prompt }];
   chatUI.addMessage("user", "PPTXのデザインを解析・再現中...");
-
   await callAIAndRender();
 }
 
 async function handlePdf(file) {
   state.sourceType = "pdf";
-
-  // Convert PDF first page to image via API
   const dataUrl = await fileToDataUrl(file);
   state.sourceDataUrl = dataUrl;
 
   const sourcePreview = document.getElementById("source-preview");
-  sourcePreview.innerHTML = `<div class="text-gray-400 text-center py-8">PDF解析中...</div>`;
+  sourcePreview.innerHTML = '<div class="text-gray-400 text-center py-8">PDFを解析中...</div>';
 
   await analyzeAndGenerate(dataUrl, "pdf");
 }
 
 async function analyzeAndGenerate(dataUrl, type) {
-  // Use Claude Vision to analyze the design
   const mediaType = type === "pdf" ? "application/pdf" : dataUrl.split(";")[0].split(":")[1];
   const base64Data = dataUrl.split(",")[1];
 
@@ -194,31 +220,37 @@ async function analyzeAndGenerate(dataUrl, type) {
   state.messages = [{
     role: "user",
     content: prompt,
-    _image: { mediaType, base64Data },
+    _attachment: { mediaType, base64Data, type },
   }];
   chatUI.addMessage("user", `${type === "pdf" ? "PDF" : "画像"}のデザインを解析・再現中...`);
-
   await callAIAndRender();
 }
 
 async function callAIAndRender() {
   try {
-    // Build API messages with image support
     const apiMessages = state.messages.map((m) => {
-      if (m._image) {
-        return {
-          role: m.role,
-          content: [
-            {
+      if (m._attachment) {
+        const isPdf = m._attachment.type === "pdf";
+        const contentBlock = isPdf
+          ? {
+              type: "document",
+              source: {
+                type: "base64",
+                media_type: m._attachment.mediaType,
+                data: m._attachment.base64Data,
+              },
+            }
+          : {
               type: "image",
               source: {
                 type: "base64",
-                media_type: m._image.mediaType,
-                data: m._image.base64Data,
+                media_type: m._attachment.mediaType,
+                data: m._attachment.base64Data,
               },
-            },
-            { type: "text", text: m.content },
-          ],
+            };
+        return {
+          role: m.role,
+          content: [contentBlock, { type: "text", text: m.content }],
         };
       }
       return { role: m.role, content: m.content };
@@ -264,7 +296,6 @@ async function callAIAndRender() {
 }
 
 async function handleRefinement(userMessage) {
-  // If we have an image, include it in context for refinement too
   const msg = { role: "user", content: userMessage };
   state.messages.push(msg);
   await callAIAndRender();
@@ -273,6 +304,8 @@ async function handleRefinement(userMessage) {
 async function executeCode(code) {
   const capturePreview = document.getElementById("capture-preview");
   const downloadBtn = document.getElementById("capture-download-btn");
+  const saveBtn = document.getElementById("capture-save-btn");
+  const templateNameInput = document.getElementById("template-name");
 
   try {
     const { pres, slides } = await generatePptx(code);
@@ -280,6 +313,9 @@ async function executeCode(code) {
     state.slideDefinitions = slides;
     slidePreview.render(capturePreview, slides);
     downloadBtn.disabled = false;
+    saveBtn.disabled = false;
+    saveBtn.classList.remove("hidden");
+    templateNameInput.classList.remove("hidden");
   } catch (err) {
     chatUI.addMessage("assistant", `コード実行エラー: ${err.message}`);
   }
