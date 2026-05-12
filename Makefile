@@ -21,7 +21,7 @@ help:
 	@echo ""
 	@echo "  \033[1m使い方の流れ\033[0m"
 	@echo "    1. make setup    → 初回セットアップ"
-	@echo "    2. web/.dev.vars に ANTHROPIC_API_KEY を設定"
+	@echo "    2. .dev.vars に ANTHROPIC_API_KEY を設定"
 	@echo "    3. make dev      → ローカルで動作確認"
 	@echo "    4. make deploy   → 本番デプロイ (.dev.varsからシークレット自動同期)"
 	@echo ""
@@ -31,12 +31,12 @@ help:
 # ============================================================
 
 setup:
-	cd web && npm install
-	@if [ ! -f web/.dev.vars ]; then \
-		cp web/.dev.vars.example web/.dev.vars; \
+	npm install
+	@if [ ! -f .dev.vars ]; then \
+		cp .dev.vars.example .dev.vars; \
 		echo ""; \
 		echo "  セットアップ完了。"; \
-		echo "  web/.dev.vars の ANTHROPIC_API_KEY を設定してください。"; \
+		echo "  .dev.vars の ANTHROPIC_API_KEY を設定してください。"; \
 	else \
 		echo ""; \
 		echo "  セットアップ完了。(.dev.vars は既に存在します)"; \
@@ -47,14 +47,14 @@ setup:
 # ============================================================
 
 dev:
-	cd web && npm run build && wrangler pages dev dist
+	npm run build && wrangler pages dev dist
 
 build:
-	cd web && npm run build
+	npm run build
 
 # ============================================================
 #  デプロイ
 # ============================================================
 
 deploy:
-	cd web && bash scripts/deploy.sh
+	bash scripts/deploy.sh
