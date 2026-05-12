@@ -2,8 +2,3 @@
 .env.*
 !.env.example
 .dev.vars
-__pycache__/
-output/*.pptx
-designs/
-templates/*.pptx
-!templates/.gitkeep

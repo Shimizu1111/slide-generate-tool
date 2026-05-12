@@ -10,7 +10,9 @@ npm run build
 
 # Deploy
 echo "Deploying to Cloudflare Pages..."
-wrangler pages deploy dist --project-name "$PROJECT"
+COMMIT_MSG=$(git log -1 --format="%h %s" | LC_ALL=C tr -cd '[:print:] ' | head -c 100)
+[ -z "$COMMIT_MSG" ] && COMMIT_MSG="deploy"
+wrangler pages deploy dist --project-name "$PROJECT" --commit-message "$COMMIT_MSG"
 
 # Sync secrets from .dev.vars
 if [ -f "$DEV_VARS" ]; then
