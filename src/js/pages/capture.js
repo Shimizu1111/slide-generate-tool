@@ -18,6 +18,22 @@ const SYSTEM_PROMPT = `あなたはスライドデザインの再現専門家で
 7. 装飾要素（ドットパターン、グラデーション、アイコン風図形）も必ず再現する
 8. 罫線は本数・太さ・位置を正確に再現する（二重線なら2本の線を描く）
 
+■ 座標の正確な計算方法:
+画像を10x5.63インチのグリッドとして見て、各要素の位置を比率で計算する。
+- 画像の左端 = x: 0、右端 = x: 10
+- 画像の上端 = y: 0、下端 = y: 5.63
+- 要素が画像の横幅の30%の位置にある場合 → x: 3.0
+- 要素が画像の高さの20%の位置にある場合 → y: 1.126
+- 必ず画像をグリッド分割して位置を計測すること
+
+■ よくある再現ミスと対策:
+- ドットパターンが大きすぎる → dotSizeは0.04〜0.08インチ程度、gapは0.15〜0.25インチ程度が自然
+- ドットの透明度が低すぎる → transparency: 60〜80で薄く
+- 線が太すぎる → width: 1〜2が基本、太線でも3程度
+- テキストサイズが大きすぎる → 元画像のテキストとスライド全体の比率を計算
+- 余白が足りない → 左右の余白は通常0.5〜1.0インチ
+- 二重線・三重線の間隔が広すぎる → 0.02〜0.05インチ間隔
+
 応答はJSON形式で:
 {
   "message": "説明メッセージ",
@@ -59,37 +75,46 @@ pptxgenjs APIリファレンス:
 ■ 装飾パターンの再現テクニック:
 - ドットパターン（ハーフトーン）: forループで小さなellipseを繰り返し配置
   例: for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) slide.addShape(pres.ShapeType.ellipse, { x: startX + c*gap, y: startY + r*gap, w: dotSize, h: dotSize, fill: { color: "CCCCCC", transparency: t } })
-- 二重線: 2本のlineを少し離して配置
+  ドットサイズの目安: dotSize=0.05, gap=0.2 で控えめなドットパターン
+- 二重線: 2本のlineを0.03インチ離して配置
+- 三重線: 3本のlineを0.03インチ間隔で配置
 - 装飾アイコン（地球、ピンなど）: テキストで Unicode 記号を使う（🌐 📍 など）
 - グラデーション風: 透明度を変えた複数の矩形を重ねる
 
 ■ 重要な注意:
 - 装飾要素を省略しない。すべての視覚要素を再現すること
-- 位置は目測でなく、スライド全体(10x5.63)に対する比率で正確に計算すること`;
+- 位置は目測でなく、スライド全体(10x5.63)に対する比率で正確に計算すること
+- 修正時は前回のコードをベースに差分修正すること（全体を一から書き直さない）`;
 
-const MAX_AUTO_REFINE = 3;
+const MAX_AUTO_REFINE = 5;
 
 const COMPARE_PROMPT = `あなたはスライドデザインの品質検査官です。
 2つの画像を比較してください:
 - 1枚目: オリジナルデザイン（目標）
 - 2枚目: 再現されたスライドのスクリーンショット
 
-以下の観点で差異を詳細に列挙してください:
-1. レイアウト・位置のずれ
-2. 欠落している要素（装飾、罫線、ドットパターン、アイコンなど）
-3. 色の違い
-4. フォントサイズ・太さの違い
-5. 線の本数・太さ・スタイルの違い
+以下の観点で差異を**具体的な数値を含めて**列挙してください:
+1. レイアウト・位置のずれ → 「○○が左に0.5インチずれている」のように具体的に
+2. 欠落している要素 → 何がどこにあるべきか
+3. 色の違い → 元の色と再現色を16進数で
+4. フォントサイズ・太さの違い → 「元は約36pt、再現は約48pt」のように
+5. 線の本数・太さ・スタイルの違い → 本数、間隔、太さを具体的に
+6. 装飾要素の品質 → ドットパターンのサイズ・間隔・透明度の具体的な修正指示
+7. テキストの改行位置・行間の違い
+
+各issueには**pptxgenjsでの具体的な修正方法**を含めてください。
+例: "ドットパターンが大きすぎる。dotSizeを0.05に、gapを0.2に変更すべき"
 
 応答はJSON形式で:
 {
   "score": 0-100,
-  "issues": ["具体的な差異1", "具体的な差異2", ...],
+  "issues": ["修正方法を含む具体的な差異1", "修正方法を含む具体的な差異2", ...],
   "passed": true/false
 }
 
-scoreが90以上ならpassed: trueにしてください。
-差異がない場合もpassed: trueにしてください。`;
+scoreが85以上ならpassed: trueにしてください。
+差異がない場合もpassed: trueにしてください。
+厳しく採点してください。微細な差異も見逃さないでください。`;
 
 let state = {
   sourceType: null,
@@ -100,6 +125,7 @@ let state = {
   pres: null,
   autoRefineCount: 0,
   isAutoRefining: false,
+  lastGeneratedCode: null,
 };
 
 export function renderCapturePage(container) {
@@ -112,6 +138,7 @@ export function renderCapturePage(container) {
     pres: null,
     autoRefineCount: 0,
     isAutoRefining: false,
+    lastGeneratedCode: null,
   };
 
   container.innerHTML = `
@@ -282,8 +309,14 @@ async function analyzeAndGenerate(dataUrl, type) {
   const base64Data = dataUrl.split(",")[1];
 
   const prompt = `この${type === "pdf" ? "PDF" : "画像"}のスライドデザインを分析して、pptxgenjsで忠実に再現してください。
-レイアウト、配色、フォントサイズ、余白、装飾などすべての要素を再現してください。
-テキスト内容はプレースホルダー（例: "タイトルをここに入力"）に置き換えてください。`;
+
+まず画像を10x5.63インチのグリッドとして分析し、各要素の正確な位置(x,y)とサイズ(w,h)をインチ単位で計測してください。
+以下をすべて再現してください:
+- テキスト: 位置、サイズ、フォント、色、太さ、行間
+- 罫線: 位置、太さ、本数（二重線・三重線の場合は複数のlineで再現）、間隔
+- 装飾: ドットパターン（小さめ: dotSize=0.05程度）、アイコン、図形
+- 背景色、余白
+- テキスト内容はそのまま維持してください（プレースホルダーに変えない）`;
 
   state.messages = [{
     role: "user",
@@ -354,6 +387,18 @@ async function callAIAndRender() {
           content: [contentBlock, { type: "text", text: m.content }],
         };
       }
+      if (m._images) {
+        const contentParts = m._images.map((img) => ({
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: img.mediaType,
+            data: img.base64Data,
+          },
+        }));
+        contentParts.push({ type: "text", text: m.content });
+        return { role: m.role, content: contentParts };
+      }
       return { role: m.role, content: m.content };
     });
 
@@ -395,6 +440,7 @@ async function callAIAndRender() {
     chatUI.addMessage("assistant", assistantMessage);
 
     if (parsed.code) {
+      state.lastGeneratedCode = parsed.code;
       await executeCode(parsed.code);
     }
   } catch (err) {
@@ -486,7 +532,7 @@ async function autoRefineLoop(previewEl) {
   try {
     while (state.autoRefineCount < MAX_AUTO_REFINE) {
       state.autoRefineCount++;
-      chatUI.addMessage("assistant", `🔍 自動チェック中... (${state.autoRefineCount}/${MAX_AUTO_REFINE})`);
+      chatUI.addMessage("assistant", `自動チェック中... (${state.autoRefineCount}/${MAX_AUTO_REFINE})`);
 
       // 1. プレビューをスクリーンショット
       const screenshot = await capturePreviewScreenshot(previewEl);
@@ -507,23 +553,46 @@ async function autoRefineLoop(previewEl) {
         break;
       }
 
-      // 4. 不合格なら自動修正
+      // 4. 不合格なら自動修正（元画像+スクリーンショット+前回コード付き）
       chatUI.addMessage("assistant", `自動修正中... (${state.autoRefineCount}/${MAX_AUTO_REFINE})`);
-      const fixPrompt = `再現度チェックの結果、以下の差異が見つかりました。これらを修正してください。
+
+      const originalBase64 = state.sourceDataUrl.split(",")[1];
+      const originalMediaType = state.sourceDataUrl.split(";")[0].split(":")[1];
+      const screenshotBase64 = screenshot.split(",")[1];
+
+      const fixPrompt = `再現度チェックの結果、以下の差異が見つかりました。
+
+1枚目の画像: オリジナルデザイン（目標）
+2枚目の画像: 現在の再現結果
 
 差異:
 ${result.issues.map((i) => `- ${i}`).join("\n")}
 
 スコア: ${result.score}/100
 
-前回のコードを修正して、これらの差異をすべて解消してください。
-すべてのスライドの完全なコードを出力してください（差分ではなく全体）。`;
+前回のコード:
+\`\`\`javascript
+${state.lastGeneratedCode || "(不明)"}
+\`\`\`
 
-      state.messages.push({ role: "user", content: fixPrompt });
+上記コードをベースに、差異を修正してください。
+画像を見比べて、位置・サイズ・色・装飾すべてを元画像に一致させてください。
+すべてのスライドの完全なコードを出力してください。`;
+
+      // 会話履歴が長くなりすぎないよう、自動修正時は直近のやり取りだけ保持
+      const trimmedMessages = trimMessagesForAutoRefine(state.messages);
+      state.messages = trimmedMessages;
+
+      const fixMessage = {
+        role: "user",
+        content: fixPrompt,
+        _images: [
+          { mediaType: originalMediaType, base64Data: originalBase64 },
+          { mediaType: "image/png", base64Data: screenshotBase64 },
+        ],
+      };
+      state.messages.push(fixMessage);
       await callAIAndRender();
-
-      // callAIAndRender内でexecuteCodeが呼ばれるが、isAutoRefining=trueなので再帰しない
-      // ループの次のイテレーションで再チェックする
     }
 
     if (state.autoRefineCount >= MAX_AUTO_REFINE) {
@@ -535,6 +604,16 @@ ${result.issues.map((i) => `- ${i}`).join("\n")}
     state.isAutoRefining = false;
     if (statusEl) statusEl.classList.add("hidden");
   }
+}
+
+// 自動修正時にメッセージ履歴を刈り込む（初回の元画像メッセージ + 直近2往復だけ残す）
+function trimMessagesForAutoRefine(messages) {
+  if (messages.length <= 5) return messages;
+  // 最初のメッセージ（元画像付き）は常に保持
+  const first = messages[0];
+  // 直近4メッセージ（2往復分）を保持
+  const recent = messages.slice(-4);
+  return [first, ...recent];
 }
 
 function fileToDataUrl(file) {
