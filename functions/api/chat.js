@@ -23,6 +23,7 @@ export async function onRequestPost(context) {
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
         max_tokens: 16384,
+        stream: true,
         system: system || undefined,
         messages,
       }),
@@ -36,13 +37,12 @@ export async function onRequestPost(context) {
       });
     }
 
-    const data = await response.json();
-    const content = data.content
-      ?.map((block) => (block.type === "text" ? block.text : ""))
-      .join("") || "";
-
-    return new Response(JSON.stringify({ content }), {
-      headers: { "Content-Type": "application/json" },
+    // ストリーミングレスポンスをそのままクライアントに転送
+    return new Response(response.body, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+      },
     });
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message }), {

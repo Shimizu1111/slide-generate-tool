@@ -226,6 +226,39 @@ async function analyzeAndGenerate(dataUrl, type) {
   await callAIAndRender();
 }
 
+async function readSSEStream(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let content = "";
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const data = line.slice(6);
+      if (data === "[DONE]") continue;
+
+      try {
+        const event = JSON.parse(data);
+        if (event.type === "content_block_delta" && event.delta?.text) {
+          content += event.delta.text;
+        }
+      } catch {
+        // ignore parse errors for non-JSON SSE lines
+      }
+    }
+  }
+
+  return content;
+}
+
 async function callAIAndRender() {
   try {
     const apiMessages = state.messages.map((m) => {
@@ -270,15 +303,13 @@ async function callAIAndRender() {
       throw new Error(`API error: ${response.status} ${errText}`);
     }
 
-    const data = await response.json();
-    const content = data.content || "";
+    const content = await readSSEStream(response);
 
     let parsed;
     try {
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { message: content };
     } catch {
-      // JSON解析失敗（トークン上限で途中切れ等）- messageだけでも抽出を試みる
       const msgMatch = content.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
       const codeMatch = content.match(/"code"\s*:\s*"([\s\S]*)/);
       if (msgMatch) {
