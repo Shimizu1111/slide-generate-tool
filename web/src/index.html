@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Slide Generate Tool</title>
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen flex">
+  <!-- Sidebar -->
+  <aside id="sidebar" class="w-64 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0 min-h-screen">
+    <div class="p-5 border-b border-gray-800">
+      <h1 class="text-lg font-bold tracking-tight">Slide Generate Tool</h1>
+    </div>
+    <nav class="flex-1 p-3 space-y-1">
+      <a href="#capture" data-page="capture"
+        class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors">
+        <span class="text-base">1</span>
+        <span>デザインキャプチャ</span>
+      </a>
+      <a href="#generate" data-page="generate"
+        class="nav-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors">
+        <span class="text-base">2</span>
+        <span>スライド生成</span>
+      </a>
+    </nav>
+    <div class="p-4 border-t border-gray-800 text-xs text-gray-500">
+      Powered by Cloudflare Pages
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main id="main-content" class="flex-1 min-h-screen overflow-auto">
+    <!-- Pages rendered here by router -->
+  </main>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
