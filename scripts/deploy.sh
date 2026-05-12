@@ -4,6 +4,20 @@ set -e
 PROJECT="slide-generate-tool"
 DEV_VARS=".dev.vars"
 
+# Check for uncommitted changes
+if [ -n "$(git status --porcelain)" ]; then
+  echo ""
+  echo "  ⚠ コミットされていない変更があります:"
+  echo ""
+  git status --short
+  echo ""
+  read -p "  このまま続行しますか？ (y/N): " answer
+  if [ "$answer" != "y" ] && [ "$answer" != "Y" ]; then
+    echo "  中止しました。先にコミットしてから再実行してください。"
+    exit 1
+  fi
+fi
+
 # Build
 echo "Building..."
 npm run build
@@ -28,6 +42,10 @@ if [ -f "$DEV_VARS" ]; then
     echo "  ✓ $key"
   done < "$DEV_VARS"
 fi
+
+# Git push
+echo "Pushing to remote..."
+git push
 
 echo ""
 echo "Deploy complete!"
