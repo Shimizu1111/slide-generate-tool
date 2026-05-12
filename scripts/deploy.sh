@@ -45,7 +45,7 @@ fi
 
 # Git push
 echo "Pushing to remote..."
-git push
+git push -u origin main
 
 echo ""
 echo "Deploy complete!"
