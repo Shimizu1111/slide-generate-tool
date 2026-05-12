@@ -41,6 +41,11 @@
 
 ## デプロイ（Cloudflare Pages）
 
+- **本番URL**: https://slide-generate-tool.pages.dev
+- **プロジェクト名**: `slide-generate-tool`
+- デプロイごとに `https://<hash>.slide-generate-tool.pages.dev` の個別URLが発行される
+- 本番URLは常に最新のProductionデプロイを指す
+
 ### 初回セットアップ
 ```bash
 make setup            # npm install + .dev.vars作成
