@@ -278,7 +278,17 @@ async function callAIAndRender() {
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : { message: content };
     } catch {
-      parsed = { message: content };
+      // JSON解析失敗（トークン上限で途中切れ等）- messageだけでも抽出を試みる
+      const msgMatch = content.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      const codeMatch = content.match(/"code"\s*:\s*"([\s\S]*)/);
+      if (msgMatch) {
+        parsed = { message: msgMatch[1] };
+        if (codeMatch) {
+          parsed.message += "\n\n⚠️ コードが途中で切れたため再現できませんでした。スライド数を減らすか、再度お試しください。";
+        }
+      } else {
+        parsed = { message: "⚠️ AIの応答が長すぎて解析できませんでした。スライド数を減らしてお試しください。" };
+      }
     }
 
     const assistantMessage = parsed.message || "デザインを再現しました。";
