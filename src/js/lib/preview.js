@@ -68,12 +68,35 @@ export const slidePreview = {
       div.style.overflow = "hidden";
 
       if (shape.type === "shape" || shape.type === "rect") {
-        div.style.backgroundColor = shape.fill ? `#${shape.fill}` : "transparent";
-        if (shape.line) {
-          div.style.border = `1px solid #${shape.line}`;
-        }
-        if (shape.borderRadius) {
-          div.style.borderRadius = `${shape.borderRadius}px`;
+        const st = shape.shapeType || "rect";
+        const lineW = shape.lineWidth ? Math.max(1, shape.lineWidth) : 1;
+
+        if (st === "line") {
+          // Render line as a thin bordered div
+          div.style.backgroundColor = "transparent";
+          div.style.borderTop = `${lineW}px ${shape.lineDash === "dash" ? "dashed" : shape.lineDash === "dot" ? "dotted" : "solid"} #${shape.line || "000000"}`;
+          div.style.height = "0px";
+        } else if (st === "ellipse") {
+          div.style.borderRadius = "50%";
+          div.style.backgroundColor = shape.fill ? `#${shape.fill}` : "transparent";
+          if (shape.fillTransparency) {
+            div.style.opacity = `${1 - shape.fillTransparency / 100}`;
+          }
+          if (shape.line) {
+            div.style.border = `${lineW}px solid #${shape.line}`;
+          }
+        } else {
+          // rect, roundRect, triangle, etc.
+          div.style.backgroundColor = shape.fill ? `#${shape.fill}` : "transparent";
+          if (shape.fillTransparency) {
+            div.style.opacity = `${1 - shape.fillTransparency / 100}`;
+          }
+          if (shape.line) {
+            div.style.border = `${lineW}px ${shape.lineDash === "dash" ? "dashed" : shape.lineDash === "dot" ? "dotted" : "solid"} #${shape.line}`;
+          }
+          if (shape.rectRadius || shape.borderRadius) {
+            div.style.borderRadius = `${shape.rectRadius || shape.borderRadius}px`;
+          }
         }
       }
 

@@ -40,14 +40,26 @@ export async function generatePptx(code) {
     // Capture addShape
     const origAddShape = slide.addShape.bind(slide);
     slide.addShape = (shapeType, opts = {}) => {
+      // Detect shape type name from ShapeType enum
+      let shapeTypeName = "rect";
+      if (shapeType === pres.ShapeType.ellipse) shapeTypeName = "ellipse";
+      else if (shapeType === pres.ShapeType.line) shapeTypeName = "line";
+      else if (shapeType === pres.ShapeType.roundRect) shapeTypeName = "roundRect";
+      else if (shapeType === pres.ShapeType.triangle) shapeTypeName = "triangle";
+
       slideData.shapes.push({
         type: "shape",
+        shapeType: shapeTypeName,
         x: opts.x || 0,
         y: opts.y || 0,
         w: opts.w,
         h: opts.h,
         fill: opts.fill?.color,
+        fillTransparency: opts.fill?.transparency,
         line: opts.line?.color,
+        lineWidth: opts.line?.width,
+        lineDash: opts.line?.dashType,
+        rectRadius: opts.rectRadius,
       });
       return origAddShape(shapeType, opts);
     };

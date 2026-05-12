@@ -3,17 +3,20 @@ import { slidePreview } from "../lib/preview.js";
 import { parsePptx } from "../lib/pptx-reader.js";
 import { generatePptx, downloadPptx } from "../lib/pptx-builder.js";
 import { saveTemplate } from "../lib/template-store.js";
+import html2canvas from "html2canvas";
 
 const SYSTEM_PROMPT = `あなたはスライドデザインの再現専門家です。
-ユーザーがアップロードした画像やPPTXのデザインを、pptxgenjsのJavaScriptコードで忠実に再現してください。
+ユーザーがアップロードした画像やPPTXのデザインを、pptxgenjsのJavaScriptコードで**完全に**再現してください。
 
 ルール:
 1. 変数名は pres (PptxGenJSインスタンス) を使う。presは既に作成済み。
-2. 元のデザインのフォント、色、レイアウト、位置、装飾をできるだけ忠実に再現する
+2. 元のデザインのフォント、色、レイアウト、位置、装飾を**ピクセル単位で忠実に**再現する
 3. テキスト部分はプレースホルダーとして残す（例: "タイトルをここに入力"）
 4. 日本語フォントは "Meiryo" または "Yu Gothic" を使う
-5. 座標・サイズはインチ単位
+5. 座標・サイズはインチ単位（スライドは 10 x 5.63 インチ）
 6. 色は6桁16進数(FFなし): "0088CC"
+7. 装飾要素（ドットパターン、グラデーション、アイコン風図形）も必ず再現する
+8. 罫線は本数・太さ・位置を正確に再現する（二重線なら2本の線を描く）
 
 応答はJSON形式で:
 {
@@ -21,15 +24,72 @@ const SYSTEM_PROMPT = `あなたはスライドデザインの再現専門家で
   "code": "// pptxgenjsコード"
 }
 
-pptxgenjs APIの主要メソッド:
+pptxgenjs APIリファレンス:
+
+■ スライド
 - pres.addSlide() - スライド追加
-- slide.addText(text, { x, y, w, h, fontSize, fontFace, color, bold, italic, align, valign, fill }) - テキスト追加
-- slide.addShape(pres.ShapeType.rect, { x, y, w, h, fill, line }) - 図形追加
 - slide.background = { fill: "FF0000" } - 背景色
 
-align: "left", "center", "right"
-valign: "top", "middle", "bottom"
-fill: { color: "0088CC" }`;
+■ テキスト
+- slide.addText(text, opts) - テキスト追加
+- slide.addText([{ text: "太字", options: { bold: true } }, { text: "通常" }], opts) - リッチテキスト
+  opts: { x, y, w, h, fontSize, fontFace, color, bold, italic, underline, align, valign, fill, line, margin, charSpacing, lineSpacingMultiple }
+
+■ 図形 (ShapeType)
+- slide.addShape(pres.ShapeType.rect, { x, y, w, h, fill, line, rectRadius, shadow }) - 矩形
+- slide.addShape(pres.ShapeType.ellipse, { x, y, w, h, fill, line }) - 楕円・円
+- slide.addShape(pres.ShapeType.line, { x, y, w, h, line }) - 直線
+- slide.addShape(pres.ShapeType.roundRect, { x, y, w, h, fill, rectRadius }) - 角丸矩形
+- slide.addShape(pres.ShapeType.triangle, { x, y, w, h, fill }) - 三角形
+
+■ 線のオプション
+  line: { color: "333333", width: 2, dashType: "solid" }
+  dashType: "solid", "dash", "dot", "lgDash", "lgDashDot", "sysDash", "sysDot"
+
+■ 塗りつぶし
+  fill: { color: "0088CC", transparency: 50 }
+
+■ 影
+  shadow: { type: "outer", blur: 3, offset: 2, color: "000000", opacity: 0.3 }
+
+■ align / valign
+  align: "left", "center", "right"
+  valign: "top", "middle", "bottom"
+
+■ 装飾パターンの再現テクニック:
+- ドットパターン（ハーフトーン）: forループで小さなellipseを繰り返し配置
+  例: for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) slide.addShape(pres.ShapeType.ellipse, { x: startX + c*gap, y: startY + r*gap, w: dotSize, h: dotSize, fill: { color: "CCCCCC", transparency: t } })
+- 二重線: 2本のlineを少し離して配置
+- 装飾アイコン（地球、ピンなど）: テキストで Unicode 記号を使う（🌐 📍 など）
+- グラデーション風: 透明度を変えた複数の矩形を重ねる
+
+■ 重要な注意:
+- 装飾要素を省略しない。すべての視覚要素を再現すること
+- 位置は目測でなく、スライド全体(10x5.63)に対する比率で正確に計算すること`;
+
+const MAX_AUTO_REFINE = 3;
+
+const COMPARE_PROMPT = `あなたはスライドデザインの品質検査官です。
+2つの画像を比較してください:
+- 1枚目: オリジナルデザイン（目標）
+- 2枚目: 再現されたスライドのスクリーンショット
+
+以下の観点で差異を詳細に列挙してください:
+1. レイアウト・位置のずれ
+2. 欠落している要素（装飾、罫線、ドットパターン、アイコンなど）
+3. 色の違い
+4. フォントサイズ・太さの違い
+5. 線の本数・太さ・スタイルの違い
+
+応答はJSON形式で:
+{
+  "score": 0-100,
+  "issues": ["具体的な差異1", "具体的な差異2", ...],
+  "passed": true/false
+}
+
+scoreが90以上ならpassed: trueにしてください。
+差異がない場合もpassed: trueにしてください。`;
 
 let state = {
   sourceType: null,
@@ -38,6 +98,8 @@ let state = {
   messages: [],
   slideDefinitions: [],
   pres: null,
+  autoRefineCount: 0,
+  isAutoRefining: false,
 };
 
 export function renderCapturePage(container) {
@@ -48,6 +110,8 @@ export function renderCapturePage(container) {
     messages: [],
     slideDefinitions: [],
     pres: null,
+    autoRefineCount: 0,
+    isAutoRefining: false,
   };
 
   container.innerHTML = `
@@ -95,8 +159,12 @@ export function renderCapturePage(container) {
           </div>
         </div>
         <div class="flex-1 flex flex-col border-t border-gray-800 min-h-0">
-          <div class="p-3 border-b border-gray-800">
+          <div class="p-3 border-b border-gray-800 flex items-center justify-between">
             <h3 class="text-sm font-medium text-gray-400">修正チャット</h3>
+            <div id="auto-refine-status" class="text-xs text-gray-500 hidden">
+              <span class="inline-block w-2 h-2 bg-yellow-400 rounded-full animate-pulse mr-1"></span>
+              自動修正中...
+            </div>
           </div>
           <div id="capture-chat" class="flex-1 flex flex-col min-h-0"></div>
         </div>
@@ -357,8 +425,115 @@ async function executeCode(code) {
     saveBtn.disabled = false;
     saveBtn.classList.remove("hidden");
     templateNameInput.classList.remove("hidden");
+
+    // 自動比較・修正ループ（元画像がある場合のみ）
+    if (state.sourceDataUrl && !state.isAutoRefining && state.autoRefineCount < MAX_AUTO_REFINE) {
+      await autoRefineLoop(capturePreview);
+    }
   } catch (err) {
     chatUI.addMessage("assistant", `コード実行エラー: ${err.message}`);
+  }
+}
+
+async function capturePreviewScreenshot(previewEl) {
+  // Wait for rendering to complete
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+  const slideEl = previewEl.querySelector(".slide-preview");
+  if (!slideEl) return null;
+
+  const canvas = await html2canvas(slideEl, {
+    backgroundColor: "#ffffff",
+    scale: 2,
+    useCORS: true,
+  });
+  return canvas.toDataURL("image/png");
+}
+
+async function compareWithOriginal(screenshotDataUrl) {
+  const originalBase64 = state.sourceDataUrl.split(",")[1];
+  const originalMediaType = state.sourceDataUrl.split(";")[0].split(":")[1];
+  const screenshotBase64 = screenshotDataUrl.split(",")[1];
+
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      system: COMPARE_PROMPT,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: originalMediaType, data: originalBase64 } },
+          { type: "image", source: { type: "base64", media_type: "image/png", data: screenshotBase64 } },
+          { type: "text", text: "これら2つの画像を比較して、再現度を評価してください。1枚目がオリジナル、2枚目が再現結果です。" },
+        ],
+      }],
+    }),
+  });
+
+  if (!response.ok) throw new Error(`Compare API error: ${response.status}`);
+
+  const content = await readSSEStream(response);
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  return jsonMatch ? JSON.parse(jsonMatch[0]) : { score: 100, issues: [], passed: true };
+}
+
+async function autoRefineLoop(previewEl) {
+  state.isAutoRefining = true;
+  const statusEl = document.getElementById("auto-refine-status");
+  if (statusEl) statusEl.classList.remove("hidden");
+
+  try {
+    while (state.autoRefineCount < MAX_AUTO_REFINE) {
+      state.autoRefineCount++;
+      chatUI.addMessage("assistant", `🔍 自動チェック中... (${state.autoRefineCount}/${MAX_AUTO_REFINE})`);
+
+      // 1. プレビューをスクリーンショット
+      const screenshot = await capturePreviewScreenshot(previewEl);
+      if (!screenshot) {
+        chatUI.addMessage("assistant", "プレビューのキャプチャに失敗しました。");
+        break;
+      }
+
+      // 2. オリジナルと比較
+      const result = await compareWithOriginal(screenshot);
+      chatUI.addMessage("assistant",
+        `再現スコア: ${result.score}/100\n${result.issues?.length ? "差異:\n- " + result.issues.join("\n- ") : "差異なし"}`
+      );
+
+      // 3. 合格なら終了
+      if (result.passed) {
+        chatUI.addMessage("assistant", "再現度チェック合格です。");
+        break;
+      }
+
+      // 4. 不合格なら自動修正
+      chatUI.addMessage("assistant", `自動修正中... (${state.autoRefineCount}/${MAX_AUTO_REFINE})`);
+      const fixPrompt = `再現度チェックの結果、以下の差異が見つかりました。これらを修正してください。
+
+差異:
+${result.issues.map((i) => `- ${i}`).join("\n")}
+
+スコア: ${result.score}/100
+
+前回のコードを修正して、これらの差異をすべて解消してください。
+すべてのスライドの完全なコードを出力してください（差分ではなく全体）。`;
+
+      state.messages.push({ role: "user", content: fixPrompt });
+      await callAIAndRender();
+
+      // callAIAndRender内でexecuteCodeが呼ばれるが、isAutoRefining=trueなので再帰しない
+      // ループの次のイテレーションで再チェックする
+    }
+
+    if (state.autoRefineCount >= MAX_AUTO_REFINE) {
+      chatUI.addMessage("assistant", `自動修正の上限(${MAX_AUTO_REFINE}回)に達しました。チャットで手動修正できます。`);
+    }
+  } catch (err) {
+    chatUI.addMessage("assistant", `自動チェックエラー: ${err.message}`);
+  } finally {
+    state.isAutoRefining = false;
+    if (statusEl) statusEl.classList.add("hidden");
   }
 }
 
