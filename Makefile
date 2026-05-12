@@ -1,4 +1,4 @@
-.PHONY: help setup create clone generate generate-ui inspect test clean
+.PHONY: help setup capture generate test clean web-setup web-dev web-build web-deploy
 
 # ============================================================
 #  make help で使い方を表示
@@ -12,23 +12,22 @@ help:
 	@echo "  \033[1mセットアップ\033[0m"
 	@echo "    make setup              初回セットアップ (依存関係インストール)"
 	@echo ""
-	@echo "  \033[1m3つの機能\033[0m"
-	@echo "    make create             テンプレートを会話形式で作る (Web UI)"
-	@echo "    make clone              既存テンプレートを完全に複製する (Web UI)"
-	@echo "    make generate-ui        画面でスライドを組み立てて生成する (Web UI)"
-	@echo "    make generate           テンプレートからスライドを生成する (CLI)"
+	@echo "  \033[1m2つの機能\033[0m"
+	@echo "    make capture            デザインキャプチャ (Web UI)"
+	@echo "    make generate           スライド生成 (Web UI)"
 	@echo ""
 	@echo "  \033[1mユーティリティ\033[0m"
-	@echo "    make inspect            テンプレートの構造を確認する"
 	@echo "    make test               全モジュールの動作確認"
 	@echo "    make clean              生成物を削除"
 	@echo ""
-	@echo "  \033[1m使い方の例\033[0m"
-	@echo "    make create                                           → チャットでデザインを伝える"
-	@echo "    make clone                                            → pptxをアップロードして複製"
-	@echo "    make generate-ui                                      → 画面でスライドを組み立てる"
-	@echo "    make generate T=templates/sales.pptx I=input/q1.json  → CLIでスライド生成"
-	@echo "    make inspect T=templates/sales.pptx                   → レイアウト情報を表示"
+	@echo "  \033[1mWeb版 (Cloudflare Pages)\033[0m"
+	@echo "    make web-setup          Web版の初回セットアップ"
+	@echo "    make web-dev            ローカル開発サーバー起動"
+	@echo "    make web-deploy         Cloudflare Pagesにデプロイ"
+	@echo ""
+	@echo "  \033[1m使い方の流れ\033[0m"
+	@echo "    1. make capture   → 画像/pptx/PDFをアップロードしてテンプレート作成"
+	@echo "    2. make generate  → テンプレートを選んでスライド生成"
 	@echo ""
 
 # ============================================================
@@ -41,82 +40,45 @@ setup:
 	@echo "  セットアップ完了。make help で使い方を確認してください。"
 
 # ============================================================
-#  機能1: テンプレート作成 (Web UI)
+#  機能1: デザインキャプチャ (Web UI)
 # ============================================================
 
-create:
-	@echo "  テンプレート作成UIを起動します..."
-	@echo "  ブラウザでチャットしながらテンプレートを作れます。"
+capture:
+	@echo "  デザインキャプチャUIを起動します..."
+	@echo "  画像・pptx・PDFをアップロードしてテンプレートを作れます。"
 	@echo ""
-	streamlit run src/ui/app.py -- --page create
+	streamlit run src/ui/app.py -- --page capture
 
 # ============================================================
-#  機能2: テンプレート複製 (Web UI)
+#  機能2: スライド生成 (Web UI)
 # ============================================================
-
-clone:
-	@echo "  テンプレート複製UIを起動します..."
-	@echo "  元のpptxをアップロードし、差分がゼロになるまで改善します。"
-	@echo ""
-	streamlit run src/ui/app.py -- --page clone
-
-# ============================================================
-#  機能3a: スライド生成 (Web UI)
-# ============================================================
-
-generate-ui:
-	@echo "  スライド生成UIを起動します..."
-	@echo "  テンプレートを選んでスライドを組み立てます。"
-	@echo ""
-	streamlit run src/ui/app.py -- --page generate
-
-# ============================================================
-#  機能3b: スライド生成 (CLI)
-# ============================================================
-
-T ?= templates/test_template.pptx
-I ?= input/test_data.json
-O ?= output/$(shell basename $(T) .pptx)_generated.pptx
 
 generate:
-ifndef T
-	@echo "  使い方: make generate T=<テンプレート> I=<入力JSON>"
-	@echo "  例:     make generate T=templates/sales.pptx I=input/q1.json"
-	@exit 1
-endif
-ifndef I
-	@echo "  使い方: make generate T=<テンプレート> I=<入力JSON>"
-	@echo "  例:     make generate T=templates/sales.pptx I=input/q1.json"
-	@exit 1
-endif
-	python generate.py --template $(T) --input $(I) --output $(O)
+	@echo "  スライド生成UIを起動します..."
+	@echo "  テンプレートを選んでスライドを生成します。"
+	@echo ""
+	streamlit run src/ui/app.py -- --page generate
 
 # ============================================================
 #  ユーティリティ
 # ============================================================
 
-inspect:
-	python generate.py --template $(T) --inspect
-
 test:
 	@python -c "\
-from src.core.inspector import inspect_template; \
+from src.core.analyzer import analyze_pptx, analyze_pptx_summary; \
 from src.core.builder import create_blank_presentation, add_slide, add_textbox, save_presentation; \
 from src.core.generator import generate_slides; \
-from src.core.comparator import compare_templates; \
 from src.core.renderer import check_libreoffice; \
 prs = create_blank_presentation(); \
 slide = add_slide(prs, 0); \
 add_textbox(slide, 25, 20, 200, 30, 'Test', font_name='Arial', font_size_pt=28); \
 save_presentation(prs, 'templates/test_template.pptx'); \
-info = inspect_template('templates/test_template.pptx'); \
-print('  inspector:  OK'); \
+info = analyze_pptx('templates/test_template.pptx'); \
+print('  analyzer:   OK'); \
 import json; \
-open('input/test_data.json','w').write(json.dumps({'slides':[{'layout':0,'placeholders':{'0':'Hello'}}]})); \
-generate_slides('templates/test_template.pptx','input/test_data.json','output/test_output.pptx'); \
+open('output/test_data.json','w').write(json.dumps({'slides':[{'layout':0,'placeholders':{'0':'Hello'}}]})); \
+generate_slides('templates/test_template.pptx','output/test_data.json','output/test_output.pptx'); \
 print('  generator:  OK'); \
-diffs = compare_templates('templates/test_template.pptx','output/test_output.pptx'); \
-print(f'  comparator: OK ({diffs[\"total_diffs\"]} diffs)'); \
 print(f'  renderer:   {\"OK\" if check_libreoffice() else \"SKIP (LibreOffice not found)\"}'); \
 print(); \
 print('  All checks passed.')"
@@ -124,3 +86,23 @@ print('  All checks passed.')"
 clean:
 	rm -rf output/*.pptx
 	@echo "  output/ を削除しました。"
+
+# ============================================================
+#  Web版 (Cloudflare Pages)
+# ============================================================
+
+web-setup:
+	cd web && npm install
+	@echo ""
+	@echo "  Web版セットアップ完了。"
+	@echo "  1. cp web/.dev.vars.example web/.dev.vars して API_KEY を設定"
+	@echo "  2. make web-dev でローカル起動"
+
+web-dev:
+	cd web && npm run build && wrangler pages dev dist
+
+web-build:
+	cd web && npm run build
+
+web-deploy:
+	cd web && bash scripts/deploy.sh
